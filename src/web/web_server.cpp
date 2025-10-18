@@ -3,109 +3,120 @@
 
 namespace web {
 
-// Variables estáticas del módulo (privadas, solo accesibles dentro del namespace)
-static WiFiServer *s_server = nullptr;  // Referencia al servidor HTTP
-static int s_ledPin = -1;                // Pin del LED a controlar
-static bool s_estado = false;            // Estado actual del LED (false=apagado, true=encendido)
+// Variables estáticas del módulo
+static WiFiServer *s_server = nullptr;
+static int s_ledPin = -1;
+static bool s_estado = false;
 
-// Analizar la petición HTTP para detectar comandos de control
-void verificarMensaje(const String &mensaje)
+// Función simple para responder al cliente
+void responderCliente(WiFiClient &cliente, const String &requestLine)
 {
-  // Buscar rutas específicas en la línea de petición HTTP
-  if (mensaje.indexOf("GET /encender") >= 0)  // URL: http://ip/encender
-  {
-    s_estado = true;                           // Cambiar estado a encendido
+  // Determinar qué página enviar y si cambiar LED
+  if (requestLine.indexOf("GET /led/encender") >= 0) {
+    s_estado = true;
+    if (s_ledPin >= 0) digitalWrite(s_ledPin, HIGH);
+    
+    // Enviar página LED con estilo CSS mejorado
+    cliente.print(PAGE_LED_START);
+    cliente.print("<div class='status status-on'>");
+    cliente.print("<span class='icon'>🟢</span>LED ENCENDIDO");
+    cliente.print("</div>");
+    cliente.print("<div class='controls'>");
+    cliente.print("<a href='/led/apagar' class='btn btn-off'>");
+    cliente.print("<span class='icon'>⭕</span>Apagar LED</a>");
+    cliente.print("<a href='/led/encender' class='btn btn-on'>");
+    cliente.print("<span class='icon'>✅</span>Encender LED</a>");
+    cliente.print("</div>");
+    cliente.print(PAGE_LED_END);
   }
-  else if (mensaje.indexOf("GET /apagar") >= 0) // URL: http://ip/apagar
-  {
-    s_estado = false;                          // Cambiar estado a apagado
+  else if (requestLine.indexOf("GET /led/apagar") >= 0) {
+    s_estado = false;
+    if (s_ledPin >= 0) digitalWrite(s_ledPin, LOW);
+    
+    // Enviar página LED con estilo CSS mejorado
+    cliente.print(PAGE_LED_START);
+    cliente.print("<div class='status status-off'>");
+    cliente.print("<span class='icon'>🔴</span>LED APAGADO");
+    cliente.print("</div>");
+    cliente.print("<div class='controls'>");
+    cliente.print("<a href='/led/apagar' class='btn btn-off'>");
+    cliente.print("<span class='icon'>⭕</span>Apagar LED</a>");
+    cliente.print("<a href='/led/encender' class='btn btn-on'>");
+    cliente.print("<span class='icon'>✅</span>Encender LED</a>");
+    cliente.print("</div>");
+    cliente.print(PAGE_LED_END);
+  }
+  else if (requestLine.indexOf("GET /led") >= 0) {
+    // Enviar página LED con estado actual
+    cliente.print(PAGE_LED_START);
+    
+    if (s_estado) {
+      cliente.print("<div class='status status-on'>");
+      cliente.print("<span class='icon'>🟢</span>LED ENCENDIDO");
+    } else {
+      cliente.print("<div class='status status-off'>");
+      cliente.print("<span class='icon'>🔴</span>LED APAGADO");
+    }
+    cliente.print("</div>");
+    
+    cliente.print("<div class='controls'>");
+    cliente.print("<a href='/led/apagar' class='btn btn-off'>");
+    cliente.print("<span class='icon'>⭕</span>Apagar LED</a>");
+    cliente.print("<a href='/led/encender' class='btn btn-on'>");
+    cliente.print("<span class='icon'>✅</span>Encender LED</a>");
+    cliente.print("</div>");
+    cliente.print(PAGE_LED_END);
+  }
+  else {
+    // Mostrar menú principal
+    cliente.print(PAGE_INDEX);
   }
 }
 
-// Generar y enviar la respuesta HTTP completa al cliente
-void responderCliente(WiFiClient &cliente)
-{
-  // Enviar cabeceras HTTP y inicio de la página HTML
-  cliente.print(PAGE_MAIN);
-  
-  // Información del cliente conectado
-  cliente.print("<p>IP cliente: ");
-  cliente.print(cliente.remoteIP());  // Mostrar IP de quien hizo la petición
-  cliente.print("</p>");
-  
-  // Estado actual del LED
-  cliente.print("<p>Estado del led: ");
-  cliente.print(s_estado ? "Encendido" : "Apagado");
-  cliente.print("</p>");
-  
-  // Botón dinámico: si está encendido muestra "Apagar", si está apagado muestra "Encender"
-  cliente.print("<p>");
-  cliente.print("<a href='/");
-  cliente.print(s_estado ? "apagar" : "encender");  // URL dinámica
-  cliente.print("'>Cambiar</a>");
-  cliente.print("</p>");
-  
-  // Cerrar tags HTML
-  cliente.print("</body></html>");
-}
-
-// Inicializar el módulo web (llamar una vez desde setup())
+// Inicializar el módulo web
 void begin(WiFiServer &server, int ledPin)
 {
-  s_server = &server;  // Guardar referencia al servidor HTTP
-  s_ledPin = ledPin;   // Guardar pin del LED a controlar
+  s_server = &server;
+  s_ledPin = ledPin;
 }
 
-// Procesar clientes HTTP entrantes (llamar repetidamente desde loop())
+// Procesar clientes HTTP - versión simplificada
 void handleClient()
 {
-  // Verificaciones de seguridad
-  if (!s_server)       // Si no se inicializó el servidor
-    return;
+  if (!s_server) return;
 
-  WiFiClient cliente = s_server->available();  // Verificar si hay cliente esperando
-  if (!cliente)        // Si no hay nadie conectado
-    return;
+  WiFiClient cliente = s_server->available();
+  if (!cliente) return;
 
-  // Parsear la petición HTTP línea por línea (protocolo HTTP estándar)
-  unsigned long tiempoActual = millis();
-  unsigned long tiempoAnterior = tiempoActual;
-  const unsigned long tiempoCancelacion = 500;  // Timeout: 500ms para leer petición completa
-  String lineaActual = "";                      // Buffer para la línea actual
-
-  // Leer petición HTTP completa con timeout
-  while (cliente.connected() && (millis() - tiempoAnterior <= tiempoCancelacion))
-  {
-    if (cliente.available())  // Si hay datos para leer
-    {
-      tiempoAnterior = millis();           // Resetear timeout
-      char letra = cliente.read();         // Leer un carácter
-      
-      if (letra == '\n')                   // Fin de línea HTTP
-      {
-        if (lineaActual.length() == 0)     // Línea vacía = fin de cabeceras HTTP
-        {
-          // PROCESAR: Aplicar cambio al LED y responder
-          if (s_ledPin >= 0)               // Verificar que el pin sea válido
-            digitalWrite(s_ledPin, s_estado);  // Aplicar nuevo estado al LED
-          responderCliente(cliente);       // Enviar página HTML de respuesta
-          break;                           // Terminar procesamiento
-        }
-        else
-        {
-          // Analizar la línea para comandos (GET /encender, GET /apagar, etc.)
-          verificarMensaje(lineaActual);
-          lineaActual = "";                // Limpiar buffer para próxima línea
+  // Leer solo la primera línea (GET /ruta HTTP/1.1)
+  String requestLine = "";
+  unsigned long timeout = millis();
+  
+  while (cliente.connected() && (millis() - timeout < 1000)) {
+    if (cliente.available()) {
+      char c = cliente.read();
+      if (c == '\n') {
+        if (requestLine.length() > 0) {
+          // Tenemos la primera línea, salir del bucle
+          break;
         }
       }
-      else if (letra != '\r')              // Ignorar caracteres de retorno de carro
-      {
-        lineaActual += letra;              // Agregar carácter al buffer
+      else if (c != '\r') {
+        requestLine += c;
       }
     }
   }
-
-  cliente.stop();                          // Cerrar conexión con el cliente
+  
+  // Leer y descartar el resto de headers
+  while (cliente.available()) {
+    String line = cliente.readStringUntil('\n');
+    if (line.length() <= 1) break; // Línea vacía = fin de headers
+  }
+  
+  // Procesar y responder
+  responderCliente(cliente, requestLine);
+  
+  cliente.stop();
 }
 
 } // namespace web
