@@ -5,4 +5,4 @@
 .vscode/ipch
 
 # Archivo con credenciales WiFi privadas
-src/data.h
+
